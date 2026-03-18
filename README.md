@@ -103,7 +103,7 @@ The analysis uses `Data/ml_data.csv` which contains:
   - **Exponential Growth**: Formula-based compound growth model
   - **Random Forest**: Ensemble ML model with n_estimators=50, max_depth=3
   - **SVR**: Support Vector Regression with RBF kernel
-- Uses Leave-One-Out Cross-Validation (LOOCV) for robust evaluation
+- Uses Time Series Split Cross-Validation for proper temporal validation
 - Calculates R², RMSE, MAE, and MAPE metrics
 - Generates future predictions from all models for comparison
 
@@ -161,8 +161,9 @@ The analysis provides:
 
 ### Cross-Validation Strategy
 
-Due to limited data (8 years: 2018-2025), **Leave-One-Out Cross-Validation (LOOCV)** is used:
-- Each data point is used once as test data
-- Remaining 7 points used for training
-- Provides most robust evaluation for small datasets
-- Avoids overfitting detection issues with traditional train/test splits
+Due to time series nature of data (2018-2025), **Time Series Split (forward chaining)** is used:
+- Non-overlapping train/test splits that respect temporal order
+- Each split: trains on earlier years, tests on later years
+- Prevents data leakage from future to past
+- For 8 years: produces 4 validation folds
+- More realistic for time series predictions vs. shuffled splits

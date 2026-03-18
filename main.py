@@ -38,6 +38,10 @@ from waste_analysis.modules.ai_validator import AIValidator
 from waste_analysis.modules.model_comparison import ModelComparison
 
 
+# Default reporting mode uses enhanced metrics from time-series model comparison.
+USE_ENHANCED_METRICS_DEFAULT = True
+
+
 # ============================================================
 # ENERGY CALCULATION CONSTANTS
 # ============================================================
@@ -55,30 +59,74 @@ HOUSEHOLD_CONSUMPTION = 1200  # kWh/year (Indian average)
 
 
 def load_ml_data():
-    """Load the ML-ready dataset"""
+    """Load yearly dataset; fallback to aggregated monthly dataset if needed."""
     data_path = os.path.join(DATA_DIR, "ml_data.csv")
-    
-    if not os.path.exists(data_path):
-        print(f"❌ Data file not found: {data_path}")
+
+    if os.path.exists(data_path):
+        data = []
+        with open(data_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                data.append({
+                    'year': int(row['year']),
+                    'avg_daily_msw_tonnes': float(row['avg_daily_msw_tonnes']),
+                    'annual_msw_tonnes': float(row['annual_msw_tonnes']),
+                    'organic_pct': float(row['organic_pct']),
+                    'plastic_pct': float(row['plastic_pct']),
+                    'paper_pct': float(row['paper_pct']),
+                    'wet_waste_pct': float(row['wet_waste_pct']),
+                    'organic_tonnes_year': float(row['organic_tonnes_year']),
+                    'source': row['primary_source']
+                })
+        return data
+
+    # Fallback: aggregate monthly dataset to yearly rows expected by this analysis.
+    monthly_path = os.path.join(DATA_DIR, "bengaluru_msw_monthly_2018_2025_clean.csv")
+    if not os.path.exists(monthly_path):
+        print(f"❌ Data files not found: {data_path} and {monthly_path}")
         return None
-    
-    data = []
-    with open(data_path, 'r', encoding='utf-8') as f:
+
+    yearly = {}
+    with open(monthly_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Convert numeric fields
-            data.append({
-                'year': int(row['year']),
-                'avg_daily_msw_tonnes': float(row['avg_daily_msw_tonnes']),
-                'annual_msw_tonnes': float(row['annual_msw_tonnes']),
-                'organic_pct': float(row['organic_pct']),
-                'plastic_pct': float(row['plastic_pct']),
-                'paper_pct': float(row['paper_pct']),
-                'wet_waste_pct': float(row['wet_waste_pct']),
-                'organic_tonnes_year': float(row['organic_tonnes_year']),
-                'source': row['primary_source']
-            })
-    
+            year = int(row['year'])
+            if year not in yearly:
+                yearly[year] = {
+                    'year': year,
+                    'annual_msw_tonnes': 0.0,
+                    'organic_tonnes_year': 0.0,
+                    'months': 0,
+                    'source': 'Aggregated from bengaluru_msw_monthly_2018_2025_clean.csv'
+                }
+
+            monthly_msw = float(row['monthly_msw_tonnes'])
+            yearly[year]['annual_msw_tonnes'] += monthly_msw
+            yearly[year]['months'] += 1
+
+            if 'organic_tonnes_month' in row and row['organic_tonnes_month']:
+                yearly[year]['organic_tonnes_year'] += float(row['organic_tonnes_month'])
+
+    data = []
+    for year in sorted(yearly.keys()):
+        entry = yearly[year]
+        annual_msw = entry['annual_msw_tonnes']
+        organic_tonnes = entry['organic_tonnes_year'] if entry['organic_tonnes_year'] > 0 else annual_msw * 0.58
+        avg_daily = annual_msw / 365.0
+        organic_pct = (organic_tonnes / annual_msw * 100.0) if annual_msw > 0 else 58.0
+
+        data.append({
+            'year': year,
+            'avg_daily_msw_tonnes': avg_daily,
+            'annual_msw_tonnes': annual_msw,
+            'organic_pct': organic_pct,
+            'plastic_pct': 0.0,
+            'paper_pct': 0.0,
+            'wet_waste_pct': organic_pct,
+            'organic_tonnes_year': organic_tonnes,
+            'source': entry['source']
+        })
+
     return data
 
 
@@ -175,7 +223,7 @@ def run_analysis():
     # ================================================================
     # Load Data
     # ================================================================
-    print("\nLoading data from ml_data.csv...")
+    print("\nLoading data (ml_data.csv with monthly fallback)...")
     data = load_ml_data()
     
     if not data:
@@ -255,7 +303,7 @@ HISTORICAL WASTE DATA (2018-2025)
 GROWTH ANALYSIS
    ─────────────────────────────────────────────────────────────
    Calculated Growth Rate: {calculated_rate*100:.2f}%
-   AI-Suggested Rate: {ai_suggested_rate*100:.2f}% {'(USED)' if ai_validated else ''}
+    AI-Suggested Rate: {(f'{ai_suggested_rate*100:.2f}%' if ai_suggested_rate is not None else 'N/A')} {'(USED)' if ai_validated and ai_suggested_rate is not None else ''}
    Final Rate Applied: {final_rate*100:.2f}%
    AI Validated: {'Yes' if ai_validated else 'No'}
    Data Source: {data[-1]['source']}""")
@@ -337,7 +385,10 @@ AI VALIDATION
     print("\n" + "=" * 70)
     print("  MODEL COMPARISON STUDY")
     print("=" * 70)
-    print("\nComparing prediction models: Exponential Growth vs Random Forest vs SVR")
+    if USE_ENHANCED_METRICS_DEFAULT:
+        print("\nComparing prediction models with enhanced default metrics: Time Series Split + monthly tonnage + 95% prediction intervals")
+    else:
+        print("\nComparing prediction models: Exponential Growth vs Random Forest vs SVR")
     
     try:
         comparison = ModelComparison()
@@ -352,16 +403,15 @@ AI VALIDATION
         print(f"""
 RECOMMENDATION
    ─────────────────────────────────────────────────────────────
-   Based on Leave-One-Out Cross-Validation:
+    Based on enhanced default metrics (Time Series Split Cross-Validation):
    
    Best Performing Model: {best_model}
    - R² Score: {best_metrics['R2']:.4f}
-   - RMSE: {best_metrics['RMSE']:,.0f} tonnes
+    - RMSE: {best_metrics['RMSE']:,.0f} tonnes/month
    - Mean Absolute Percentage Error: {best_metrics['MAPE']:.2f}%
    
-   Note: With only 8 data points (2018-2025), all models have limited
-   training data. The exponential growth model may extrapolate better
-   for long-term predictions, while ML models capture recent patterns.
+    Note: Metrics are calculated on monthly data using forward-chaining
+    validation, so this is now the default enhanced evaluation path.
 """)
         
         # Generate visualization graphs
