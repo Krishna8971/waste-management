@@ -1,169 +1,168 @@
 # Waste Analysis Package
 
-A comprehensive waste generation and **biodegradable energy potential** analysis tool for Bengaluru city.
+Waste and biodegradable energy forecasting pipeline for Bengaluru, including:
+- historical trend analysis
+- future MSW projections
+- biogas-to-electricity sensitivity analysis
+- optional AI validation
+- multi-model forecasting comparison
 
-## Module Structure
+## Project Structure
 
 ```
 waste_analysis/
-├── __init__.py           # Package initialization
-├── main.py               # Main entry point & analysis runner
-├── README.md             # This file
+├── __init__.py
+├── main.py
+├── README.md
+├── readme.txt
+├── requirements.txt
+├── graphs/
 └── modules/
     ├── __init__.py
-    ├── ai_validator.py       # AI-powered validation via OpenRouter
-    ├── data_loader.py        # Data loading and management
-    ├── energy_calculator.py  # Energy potential calculations
-    ├── model_comparison.py   # ML model comparison (RF, SVR, Exponential)
-    ├── prediction.py         # Future waste prediction
-    ├── recycling_analysis.py # Recycling and energy analysis
-    ├── ward_analysis.py      # Individual ward analysis
-    └── waste_composition.py  # Waste composition by zone
+    ├── ai_validator.py
+    ├── data_loader.py
+    ├── energy_calculator.py
+    ├── energy_config.py
+    ├── model_comparison.py
+    ├── prediction.py
+    ├── recycling_analysis.py
+    ├── ward_analysis.py
+    └── waste_composition.py
 ```
 
-## Key Features
+## What The Pipeline Does
 
-1. **Historical Data Analysis**: Uses ML-ready data from 2018-2025 (`Data/ml_data.csv`)
-2. **AI-Validated Predictions**: Optional AI validation of growth rates via OpenRouter API (free models)
-3. **Biodegradable Energy Calculations**: Calculates biogas and electricity generation potential
-4. **Future Projections**: Predicts waste generation for 2026, 2028, 2030, and 2035
-5. **Environmental Impact**: CO2 emissions avoided and households that can be powered
-6. **Model Comparison Study**: Compares Exponential Growth, Random Forest, and SVR models
+1. Loads annual ML data from `Data/ml_data.csv`.
+2. Falls back to monthly data file if annual file is unavailable.
+3. Computes historical growth and predicts waste for 2026, 2028, 2030, and 2035.
+4. Converts organic waste to biogas and electricity with sensitivity ranges.
+5. Reports household-equivalent supply and avoided CO2.
+6. Runs model comparison using time-series aware validation.
+7. Optionally asks AI models (OpenRouter) to validate growth assumptions.
 
-## How to Run
+## Data Files Expected
 
-From the `Research INFO` directory:
+Primary (preferred):
+- `Data/ml_data.csv`
+
+Fallback (used if primary is missing):
+- `Data/bengaluru_msw_monthly_2018_2025_clean.csv`
+
+Note:
+- In current code, the `Data` directory is expected one level above this folder (same level as `waste_analysis`).
+
+## Setup Guide
+
+### 1. Prerequisites
+
+- Python 3.10+
+- pip
+
+### 2. Create and activate a virtual environment
+
+Windows PowerShell:
+
+```powershell
+python -m venv venv
+./venv/Scripts/Activate.ps1
+```
+
+macOS/Linux:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+`requirements.txt` currently includes:
+- pandas
+- numpy
+- scikit-learn
+- matplotlib
+
+### 4. Optional: Enable AI validation
+
+Create `.env` in this folder (`waste_analysis/.env`) and add:
+
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key
+```
+
+If no API key is present, AI validation is skipped and analysis still runs.
+
+## Startup Guide
+
+Run from the parent directory (recommended):
 
 ```bash
 python -m waste_analysis.main
 ```
 
-Or run directly:
+Or run directly from this directory:
 
 ```bash
-python waste_analysis/main.py
+python main.py
 ```
 
-## Configuration
+## Energy Sensitivity Configuration
 
-### AI Validation (Optional)
+Energy sensitivity is configured in `modules/energy_config.py`:
 
-To enable AI-powered validation of growth rate predictions:
+- Biogas yield (m3/tonne): 80, 100, 120
+- Electrical efficiency: 0.25, 0.35, 0.45
+- Biogas energy content: 6.0 kWh/m3
+- Household consumption: 1200 kWh/year
 
-1. Create a `.env` file in the `waste_analysis/` directory
-2. Add your OpenRouter API key:
-   ```
-   OPENROUTER_API_KEY=your_api_key_here
-   ```
+The report now prints ranges from low-to-high scenarios, for example:
+- Electricity potential: `45-78 GWh/year`
 
-The system uses free models from OpenRouter for validation.
+## Output Sections
 
-## Data Source
+The main run prints:
+- historical waste data summary
+- growth analysis and AI validation status
+- waste generation forecasts
+- current biodegradable energy potential (range)
+- future biodegradable energy potential (range)
+- 2030 summary with min-max values
+- model comparison metrics and recommendation
 
-The analysis uses `Data/ml_data.csv` which contains:
-- Year (2018-2025)
-- Average daily MSW in tonnes
-- Annual MSW in tonnes
-- Waste composition percentages (organic, plastic, paper, wet waste)
-- Organic tonnes per year
-- Data source references
+## Module Overview
 
-## Modules Description
+- `main.py`: end-to-end CLI analysis flow and reporting
+- `modules/energy_config.py`: sensitivity ranges and core constants for biogas-electricity conversion
+- `modules/model_comparison.py`: baseline + ML model benchmarking with `TimeSeriesSplit`
+- `modules/ai_validator.py`: OpenRouter-based validation helpers
+- `modules/data_loader.py`: legacy ward/demographic loaders
+- `modules/ward_analysis.py`: ward-level historical analysis helpers
+- `modules/waste_composition.py`: zone composition assumptions
+- `modules/recycling_analysis.py`: recycling and energy analysis helpers
+- `modules/energy_calculator.py`: composition-based energy calculator used by recycling analysis utilities
+- `modules/prediction.py`: alternative prediction utility based on ward aggregates
 
-### Main Entry (`main.py`)
-- Loads ML-ready data from CSV
-- Calculates historical growth rates
-- Generates future waste predictions
-- Computes biodegradable energy potential
-- Displays comprehensive analysis results
+## Troubleshooting
 
-### AIValidator (`modules/ai_validator.py`)
-- Validates growth rate predictions using AI models
-- Uses OpenRouter API with free model fallback
-- Provides AI-suggested growth rates and explanations
+- `Data files not found`:
+  Ensure `Data/ml_data.csv` exists at the expected parent-level `Data` directory.
+- `ModuleNotFoundError` when running direct script:
+  Prefer `python -m waste_analysis.main` from the parent directory.
+- AI validation unavailable:
+  Check `.env` key and internet connectivity. The run still proceeds without AI.
+- Model comparison skipped:
+  Install/verify `scikit-learn` and `matplotlib`.
 
-### DataLoader (`modules/data_loader.py`)
-- Loads waste, demographic, and segregation data
-- Provides methods to access ward and zone data
+## Quick Start (PowerShell)
 
-### EnergyCalculator (`modules/energy_calculator.py`)
-- Calculates renewable energy potential from organic waste
-- Biogas yield: 100 m³ per tonne of organic waste
-- Energy content: 6.0 kWh/m³ biogas
-- Electrical efficiency: 35%
-- CO2 avoidance calculations (0.82 kg CO2/kWh for Indian grid)
-
-### WastePrediction (`modules/prediction.py`)
-- Calculates growth rates from historical data
-- Blends city-wide and ward-specific trends
-- Accounts for population growth
-
-### ModelComparison (`modules/model_comparison.py`)
-- Compares three prediction models:
-  - **Exponential Growth**: Formula-based compound growth model
-  - **Random Forest**: Ensemble ML model with n_estimators=50, max_depth=3
-  - **SVR**: Support Vector Regression with RBF kernel
-- Uses Time Series Split Cross-Validation for proper temporal validation
-- Calculates R², RMSE, MAE, and MAPE metrics
-- Generates future predictions from all models for comparison
-
-### WasteComposition (`modules/waste_composition.py`)
-- Zone-specific waste composition data
-- Research-based percentages for Indian cities
-
-### WardAnalyzer (`modules/ward_analysis.py`)
-- Analyzes individual ward data
-- Calculates collection and processing efficiencies
-
-### RecyclingAnalyzer (`modules/recycling_analysis.py`)
-- Analyzes recycling potential
-- Energy potential projections
-
-## Output Metrics
-
-The analysis provides:
-
-| Metric | Description |
-|--------|-------------|
-| Biogas Production | Million m³/year from organic waste |
-| Electrical Energy | GWh/year potential |
-| Households Powered | Number of homes that can be supplied |
-| CO2 Avoided | Tonnes of emissions prevented annually |
-
-## Energy Calculation Constants
-
-| Parameter | Value | Unit |
-|-----------|-------|------|
-| Biogas yield | 100 | m³/tonne organic waste |
-| Biogas energy content | 6.0 | kWh/m³ |
-| Electrical efficiency | 35% | - |
-| Household consumption | 1,200 | kWh/year (Indian avg) |
-| Grid CO2 intensity | 0.82 | kg CO2/kWh |
-
-## Model Comparison Methodology
-
-### Models Compared
-
-| Model | Type | Description |
-|-------|------|-------------|
-| Exponential Growth | Statistical | y = base × (1 + r)^n where r is avg growth rate |
-| Random Forest | ML Ensemble | 50 trees, max_depth=3 (tuned for small data) |
-| SVR | ML Kernel | RBF kernel, C=100, with feature scaling |
-
-### Evaluation Metrics
-
-| Metric | Description | Ideal Value |
-|--------|-------------|-------------|
-| R² (R-squared) | Variance explained by model | Close to 1.0 |
-| RMSE | Root Mean Square Error | Lower is better |
-| MAE | Mean Absolute Error | Lower is better |
-| MAPE | Mean Absolute Percentage Error | Lower is better |
-
-### Cross-Validation Strategy
-
-Due to time series nature of data (2018-2025), **Time Series Split (forward chaining)** is used:
-- Non-overlapping train/test splits that respect temporal order
-- Each split: trains on earlier years, tests on later years
-- Prevents data leakage from future to past
-- For 8 years: produces 4 validation folds
-- More realistic for time series predictions vs. shuffled splits
+```powershell
+# from .../Research INFO/waste_analysis
+python -m venv venv
+./venv/Scripts/Activate.ps1
+pip install -r requirements.txt
+python main.py
+```

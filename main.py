@@ -36,26 +36,15 @@ load_env_file()
 
 from waste_analysis.modules.ai_validator import AIValidator
 from waste_analysis.modules.model_comparison import ModelComparison
+from waste_analysis.modules.energy_config import (
+    BIOGAS_ENERGY_CONTENT,
+    HOUSEHOLD_CONSUMPTION,
+    ENERGY_SENSITIVITY,
+)
 
 
 # Default reporting mode uses enhanced metrics from time-series model comparison.
 USE_ENHANCED_METRICS_DEFAULT = True
-
-
-# ============================================================
-# ENERGY CALCULATION CONSTANTS
-# ============================================================
-# Biogas yield from organic waste (m³ per tonne of organic waste)
-BIOGAS_YIELD_PER_TONNE = 100  # m³/tonne (conservative estimate)
-
-# Energy content of biogas (kWh per m³)
-BIOGAS_ENERGY_CONTENT = 6.0  # kWh/m³
-
-# Electrical conversion efficiency for biogas generators
-ELECTRICAL_EFFICIENCY = 0.35  # 35%
-
-# Average household electricity consumption (kWh per year)
-HOUSEHOLD_CONSUMPTION = 1200  # kWh/year (Indian average)
 
 
 def load_ml_data():
@@ -174,24 +163,26 @@ def predict_future_waste(data, target_years, growth_rate=None):
     return predictions, growth_rate
 
 
-def calculate_energy_potential(organic_tonnes):
+def calculate_energy_potential(organic_tonnes, biogas_yield_per_tonne, electrical_efficiency):
     """
-    Calculate biodegradable energy generation potential
+    Calculate biodegradable energy generation potential for one parameter set.
     
     Args:
         organic_tonnes: Annual organic waste in tonnes
+        biogas_yield_per_tonne: Biogas yield in m3 per tonne
+        electrical_efficiency: Electrical conversion efficiency [0, 1]
         
     Returns:
         dict: Energy potential metrics
     """
     # Biogas production
-    biogas_volume = organic_tonnes * BIOGAS_YIELD_PER_TONNE  # m³/year
+    biogas_volume = organic_tonnes * biogas_yield_per_tonne  # m³/year
     
     # Total energy in biogas
     total_energy = biogas_volume * BIOGAS_ENERGY_CONTENT  # kWh/year
     
     # Electrical energy (after conversion efficiency)
-    electrical_energy = total_energy * ELECTRICAL_EFFICIENCY  # kWh/year
+    electrical_energy = total_energy * electrical_efficiency  # kWh/year
     
     # Convert to MWh
     electrical_mwh = electrical_energy / 1000
@@ -208,6 +199,47 @@ def calculate_energy_potential(organic_tonnes):
         'electrical_gwh': electrical_mwh / 1000,
         'households_powered': households_powered,
         'co2_avoided_tonnes': co2_avoided
+    }
+
+
+def calculate_energy_sensitivity(organic_tonnes):
+    """Run sensitivity analysis across configured biogas and efficiency ranges."""
+    scenarios = {}
+
+    for yield_label, biogas_yield in ENERGY_SENSITIVITY['biogas_yield'].items():
+        for efficiency_label, efficiency in ENERGY_SENSITIVITY['efficiency'].items():
+            scenario_name = f"{yield_label}_{efficiency_label}"
+            scenarios[scenario_name] = calculate_energy_potential(
+                organic_tonnes,
+                biogas_yield,
+                efficiency,
+            )
+
+    metric_keys = [
+        'biogas_million_m3',
+        'electrical_mwh',
+        'electrical_gwh',
+        'households_powered',
+        'co2_avoided_tonnes',
+    ]
+    ranges = {}
+    for key in metric_keys:
+        values = [scenario[key] for scenario in scenarios.values()]
+        ranges[key] = {
+            'min': min(values),
+            'max': max(values),
+        }
+
+    mid_case = calculate_energy_potential(
+        organic_tonnes,
+        ENERGY_SENSITIVITY['biogas_yield']['mid'],
+        ENERGY_SENSITIVITY['efficiency']['mid'],
+    )
+
+    return {
+        'scenarios': scenarios,
+        'ranges': ranges,
+        'mid_case': mid_case,
     }
 
 
@@ -277,11 +309,11 @@ def run_analysis():
     # Calculate Energy Potential
     # ================================================================
     current_organic = data[-1]['organic_tonnes_year']
-    current_energy = calculate_energy_potential(current_organic)
+    current_energy = calculate_energy_sensitivity(current_organic)
     
     future_energy = {}
     for year, pred in predictions.items():
-        future_energy[year] = calculate_energy_potential(pred['organic_tonnes'])
+        future_energy[year] = calculate_energy_sensitivity(pred['organic_tonnes'])
     
     # ================================================================
     # DISPLAY RESULTS
@@ -324,10 +356,17 @@ WASTE GENERATION PREDICTIONS
 CURRENT BIODEGRADABLE ENERGY POTENTIAL (2025)
    ─────────────────────────────────────────────────────────────
    Organic Waste Available: {current_organic:>15,.0f} tonnes/year
-   Biogas Production:       {current_energy['biogas_million_m3']:>15.2f} million m3/year
-   Electrical Energy:       {current_energy['electrical_gwh']:>15.2f} GWh/year
-   Households Powered:      {current_energy['households_powered']:>15,.0f} homes
-   CO2 Emissions Avoided:   {current_energy['co2_avoided_tonnes']:>15,.0f} tonnes/year""")
+    Biogas Production:       {current_energy['ranges']['biogas_million_m3']['min']:>7.2f}-{current_energy['ranges']['biogas_million_m3']['max']:<7.2f} million m3/year
+    Electrical Energy:       {current_energy['ranges']['electrical_gwh']['min']:>7.2f}-{current_energy['ranges']['electrical_gwh']['max']:<7.2f} GWh/year
+    Households Powered:      {current_energy['ranges']['households_powered']['min']:>7,.0f}-{current_energy['ranges']['households_powered']['max']:<7,.0f} homes
+    CO2 Emissions Avoided:   {current_energy['ranges']['co2_avoided_tonnes']['min']:>7,.0f}-{current_energy['ranges']['co2_avoided_tonnes']['max']:<7,.0f} tonnes/year
+    Mid-Case Electricity:    {current_energy['mid_case']['electrical_gwh']:>15.2f} GWh/year""")
+
+    print(f"""
+SENSITIVITY PARAMETERS
+    ─────────────────────────────────────────────────────────────
+    Biogas Yield (m3/tonne): low={ENERGY_SENSITIVITY['biogas_yield']['low']:.0f}, mid={ENERGY_SENSITIVITY['biogas_yield']['mid']:.0f}, high={ENERGY_SENSITIVITY['biogas_yield']['high']:.0f}
+    Electrical Efficiency:   low={ENERGY_SENSITIVITY['efficiency']['low']:.2f}, mid={ENERGY_SENSITIVITY['efficiency']['mid']:.2f}, high={ENERGY_SENSITIVITY['efficiency']['high']:.2f}""")
     
     # Future Energy Potential
     print(f"""
@@ -339,10 +378,10 @@ FUTURE BIODEGRADABLE ENERGY POTENTIAL
         print(f"""   
    {year}:
       - Organic Waste:     {predictions[year]['organic_tonnes']:>12,.0f} tonnes/year
-      - Biogas Production: {energy['biogas_million_m3']:>12.2f} million m3/year
-      - Electrical Energy: {energy['electrical_gwh']:>12.2f} GWh/year
-      - Households Powered:{energy['households_powered']:>12,.0f} homes
-      - CO2 Avoided:       {energy['co2_avoided_tonnes']:>12,.0f} tonnes/year""")
+            - Biogas Production: {energy['ranges']['biogas_million_m3']['min']:>5.2f}-{energy['ranges']['biogas_million_m3']['max']:<5.2f} million m3/year
+            - Electrical Energy: {energy['ranges']['electrical_gwh']['min']:>5.2f}-{energy['ranges']['electrical_gwh']['max']:<5.2f} GWh/year
+            - Households Powered:{energy['ranges']['households_powered']['min']:>5,.0f}-{energy['ranges']['households_powered']['max']:<5,.0f} homes
+            - CO2 Avoided:       {energy['ranges']['co2_avoided_tonnes']['min']:>5,.0f}-{energy['ranges']['co2_avoided_tonnes']['max']:<5,.0f} tonnes/year""")
     
     # AI Validation Section
     if ai_validated:
@@ -368,11 +407,11 @@ AI VALIDATION
 
   By 2030, Bengaluru can generate approximately:
   
-    {energy_2030['electrical_gwh']:.1f} GWh of electricity per year
+        {energy_2030['ranges']['electrical_gwh']['min']:.1f}-{energy_2030['ranges']['electrical_gwh']['max']:.1f} GWh of electricity per year
     
-    Power for {energy_2030['households_powered']:,.0f} households
+        Power for {energy_2030['ranges']['households_powered']['min']:,.0f}-{energy_2030['ranges']['households_powered']['max']:,.0f} households
     
-    Avoid {energy_2030['co2_avoided_tonnes']:,.0f} tonnes of CO2 emissions
+        Avoid {energy_2030['ranges']['co2_avoided_tonnes']['min']:,.0f}-{energy_2030['ranges']['co2_avoided_tonnes']['max']:,.0f} tonnes of CO2 emissions
     
   Using organic waste from the city's municipal solid waste stream.
   
